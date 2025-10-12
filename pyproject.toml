@@ -1,0 +1,21 @@
+[project]
+name = "paper_structure"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "pip",
+    "numpy>1.24.4",
+    "opencv-python>=4.5.0",
+    "onnxruntime>=1.10.0",
+    "Pillow>=8.0.0",
+    "huggingface-hub>=0.10.0",
+    "pypdfium2>=4.30.0",
+    "shapely",
+    "pyclipper",
+    "scikit-image",
+    "tokenizers>=0.10.0",
+    "requests>=2.25.0",
+    "tqdm>=4.60.0",
+]
