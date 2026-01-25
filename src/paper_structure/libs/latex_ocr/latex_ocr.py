@@ -162,7 +162,13 @@ class LaTeXOCR:
             
             resizer_res = self.image_resizer([final_img.astype(np.float32)])[0]
             
-            argmax_idx = int(np.argmax(resizer_res, axis=-1))
+            # Handle different output shapes from the resizer model
+            argmax_result = np.argmax(resizer_res, axis=-1)
+            # Ensure we get a scalar value
+            if isinstance(argmax_result, np.ndarray):
+                argmax_idx = int(argmax_result.flat[0])
+            else:
+                argmax_idx = int(argmax_result)
             w = (argmax_idx + 1) * 32
             
             if w == pad_img.size[0]:

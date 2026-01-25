@@ -3,8 +3,10 @@ Main Pipeline for Paper Structure Analysis
 Orchestrates layout detection, text recognition, and content extraction
 """
 
+import hashlib
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 import pypdfium2 as pdfium
 from PIL import Image
 from typing import List, Dict, Any, Optional
@@ -106,6 +108,10 @@ class PaperStructurePipeline:
         # Configuration
         self.skip_types = skip_types or ['Page-header', 'Page-footer']
         
+        # Image output directory (set during process_pdf)
+        self._image_output_dir: Optional[Path] = None
+        self._extracted_images: List[Dict[str, Any]] = []
+        
         print("Pipeline ready!\n")
     
     def process_image(self, image: Image.Image) -> List[Dict[str, Any]]:
@@ -124,7 +130,11 @@ class PaperStructurePipeline:
         # Step 2: Run OCR once on full image (efficient)
         all_text_results = self.text_recognizer.recognize(image)
         
-        # Step 3: Extract content for each element
+        # Step 3: Sort elements by reading order (top-to-bottom, left-to-right)
+        # For two-column layouts, we need to detect columns and sort within each
+        layout_elements = self._sort_by_reading_order(layout_elements, image.width)
+        
+        # Step 4: Extract content for each element
         structured_elements = []
         
         for element in layout_elements:
@@ -146,8 +156,8 @@ class PaperStructurePipeline:
                     content = "[Formula]"
                     
             elif element_type in ['Picture', 'Figure']:
-                # Keep as image reference
-                content = f"[{element_type}]"
+                # Extract and save image, store path for later
+                content = self._extract_image_region(image, bbox)
                 
             elif element_type == 'Table':
                 # Extract text from OCR results
@@ -167,6 +177,169 @@ class PaperStructurePipeline:
             })
         
         return structured_elements
+    
+    def _extract_image_region(self, image: Image.Image, bbox: List[int]) -> str:
+        """
+        Extract image region and return a placeholder with hash for later saving
+        
+        Args:
+            image: Full PIL Image
+            bbox: [x1, y1, x2, y2]
+            
+        Returns:
+            Image placeholder string with hash identifier
+        """
+        x1, y1, x2, y2 = bbox
+        
+        # Add small padding
+        padding = 5
+        x1 = max(0, x1 - padding)
+        y1 = max(0, y1 - padding)
+        x2 = min(image.width, x2 + padding)
+        y2 = min(image.height, y2 + padding)
+        
+        # Crop the region
+        region = image.crop((x1, y1, x2, y2))
+        
+        # Generate hash from image content for unique filename
+        import io
+        img_bytes = io.BytesIO()
+        region.save(img_bytes, format='JPEG', quality=95)
+        img_hash = hashlib.sha256(img_bytes.getvalue()).hexdigest()
+        
+        # Store image data for later saving
+        self._extracted_images.append({
+            'hash': img_hash,
+            'image': region,
+            'bbox': bbox
+        })
+        
+        # Return placeholder that will be used in markdown
+        return f"__IMAGE__{img_hash}__"
+    
+    def _save_extracted_images(self, output_dir: Path) -> Dict[str, str]:
+        """
+        Save all extracted images to output directory
+        
+        Args:
+            output_dir: Directory to save images
+            
+        Returns:
+            Mapping of image hash to relative file path
+        """
+        images_dir = output_dir / "images"
+        images_dir.mkdir(parents=True, exist_ok=True)
+        
+        hash_to_path = {}
+        for img_data in self._extracted_images:
+            img_hash = img_data['hash']
+            if img_hash not in hash_to_path:
+                filename = f"{img_hash}.jpg"
+                filepath = images_dir / filename
+                img_data['image'].save(filepath, 'JPEG', quality=95)
+                hash_to_path[img_hash] = f"images/{filename}"
+        
+        return hash_to_path
+    
+    def _sort_by_reading_order(self, elements: List[Dict[str, Any]], page_width: int) -> List[Dict[str, Any]]:
+        """
+        Sort elements by reading order, handling multi-column layouts
+        
+        Args:
+            elements: List of layout elements
+            page_width: Width of the page in pixels
+            
+        Returns:
+            Elements sorted in reading order
+        """
+        if not elements:
+            return elements
+        
+        # Detect if this is a two-column layout by analyzing element positions
+        # Elements in left column have x_center < page_width/2
+        # Elements in right column have x_center >= page_width/2
+        
+        mid_x = page_width / 2
+        column_threshold = page_width * 0.1  # 10% tolerance for column detection
+        
+        left_column = []
+        right_column = []
+        full_width = []  # Elements spanning both columns (titles, headers, etc.)
+        
+        for element in elements:
+            bbox = element['bbox']
+            x1, y1, x2, y2 = bbox
+            elem_width = x2 - x1
+            x_center = (x1 + x2) / 2
+            
+            # Check if element spans most of the page width (full-width element)
+            if elem_width > page_width * 0.6:
+                full_width.append(element)
+            # Check if element is in left column
+            elif x2 < mid_x + column_threshold:
+                left_column.append(element)
+            # Check if element is in right column
+            elif x1 > mid_x - column_threshold:
+                right_column.append(element)
+            else:
+                # Element spans columns but isn't full-width, treat as full-width
+                full_width.append(element)
+        
+        # Sort each group by y-coordinate (top to bottom)
+        def sort_key(elem):
+            return elem['bbox'][1]  # y1 coordinate
+        
+        left_column.sort(key=sort_key)
+        right_column.sort(key=sort_key)
+        full_width.sort(key=sort_key)
+        
+        # Merge: full-width elements first (by position), then left column, then right column
+        # But we need to interleave based on y-position
+        result = []
+        
+        # Create a list of (y_position, element, priority) tuples
+        # Priority: 0 = full-width (highest), 1 = left column, 2 = right column
+        all_elements = []
+        for elem in full_width:
+            all_elements.append((elem['bbox'][1], elem, 0))
+        for elem in left_column:
+            all_elements.append((elem['bbox'][1], elem, 1))
+        for elem in right_column:
+            all_elements.append((elem['bbox'][1], elem, 2))
+        
+        # Sort by y-position, then by priority (full-width first, then left, then right)
+        # For two-column layout, we want: full-width at top, then all left column, then all right column
+        # But if columns are interleaved with full-width, respect that
+        
+        # Group elements by vertical regions
+        # A full-width element creates a "break" between column sections
+        
+        sorted_result = []
+        current_left = []
+        current_right = []
+        
+        # Sort all elements by y-position
+        all_sorted = sorted(all_elements, key=lambda x: x[0])
+        
+        for y_pos, elem, priority in all_sorted:
+            if priority == 0:  # Full-width element
+                # Flush current columns (left first, then right)
+                sorted_result.extend(current_left)
+                sorted_result.extend(current_right)
+                current_left = []
+                current_right = []
+                # Add full-width element
+                sorted_result.append(elem)
+            elif priority == 1:  # Left column
+                current_left.append(elem)
+            else:  # Right column
+                current_right.append(elem)
+        
+        # Flush remaining column elements
+        sorted_result.extend(current_left)
+        sorted_result.extend(current_right)
+        
+        return sorted_result
     
     def _extract_text_from_bbox(self, ocr_results: List[Dict[str, Any]], target_bbox: List[int]) -> str:
         """
@@ -204,7 +377,7 @@ class PaperStructurePipeline:
         target_texts.sort(key=lambda x: x[0])
         return ' '.join(text for _, text in target_texts)
     
-    def process_pdf(self, pdf_path: str, page_limit: Optional[int] = None, parallel: bool = True) -> Dict[str, Any]:
+    def process_pdf(self, pdf_path: str, page_limit: Optional[int] = None, parallel: bool = True, output_dir: Optional[str] = None) -> Dict[str, Any]:
         """
         Process entire PDF with optional parallel processing
         
@@ -212,10 +385,21 @@ class PaperStructurePipeline:
             pdf_path: Path to PDF file
             page_limit: Maximum number of pages to process (None = all)
             parallel: Enable parallel processing (one thread per page)
+            output_dir: Directory to save extracted images (default: same as PDF)
             
         Returns:
             Dictionary with pages and markdown output
         """
+        # Reset extracted images for new processing
+        self._extracted_images = []
+        
+        # Set output directory for images
+        pdf_path_obj = Path(pdf_path)
+        if output_dir:
+            self._image_output_dir = Path(output_dir)
+        else:
+            self._image_output_dir = pdf_path_obj.parent
+        
         if parallel:
             return self._process_pdf_parallel(pdf_path, page_limit)
         else:
@@ -282,6 +466,10 @@ class PaperStructurePipeline:
             
             print(f"\nSuccessfully processed {len(processed_pages)}/{pages_to_process} pages")
             
+            # Save extracted images and get path mapping
+            print("Saving extracted images...")
+            hash_to_path = self._save_extracted_images(self._image_output_dir)
+            
             # Generate markdown
             print("Generating markdown...")
             all_elements = []
@@ -290,6 +478,12 @@ class PaperStructurePipeline:
             
             markdown = self.markdown_generator.generate(all_elements)
             
+            # Replace image placeholders with actual paths
+            for img_hash, img_path in hash_to_path.items():
+                placeholder = f"__IMAGE__{img_hash}__"
+                markdown = markdown.replace(f"![Figure]\n\n{placeholder}", f"![](images/{img_hash}.jpg)")
+                markdown = markdown.replace(placeholder, f"![](images/{img_hash}.jpg)")
+            
             return {
                 'pages': processed_pages,
                 'markdown': markdown,
@@ -297,6 +491,7 @@ class PaperStructurePipeline:
                     'total_pages': total_pages,
                     'processed_pages': len(processed_pages),
                     'total_elements': len(all_elements),
+                    'extracted_images': len(hash_to_path),
                     'parallel': True
                 }
             }
@@ -368,6 +563,10 @@ class PaperStructurePipeline:
                 
                 print(f"  Detected {len(elements)} elements\n")
             
+            # Save extracted images and get path mapping
+            print("Saving extracted images...")
+            hash_to_path = self._save_extracted_images(self._image_output_dir)
+            
             # Generate markdown
             print("Generating markdown...")
             all_elements = []
@@ -376,6 +575,12 @@ class PaperStructurePipeline:
             
             markdown = self.markdown_generator.generate(all_elements)
             
+            # Replace image placeholders with actual paths
+            for img_hash, img_path in hash_to_path.items():
+                placeholder = f"__IMAGE__{img_hash}__"
+                markdown = markdown.replace(f"![Figure]\n\n{placeholder}", f"![](images/{img_hash}.jpg)")
+                markdown = markdown.replace(placeholder, f"![](images/{img_hash}.jpg)")
+            
             return {
                 'pages': all_pages,
                 'markdown': markdown,
@@ -383,6 +588,7 @@ class PaperStructurePipeline:
                     'total_pages': total_pages,
                     'processed_pages': pages_to_process,
                     'total_elements': len(all_elements),
+                    'extracted_images': len(hash_to_path),
                     'parallel': False
                 }
             }

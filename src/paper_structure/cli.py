@@ -131,7 +131,8 @@ Examples:
         
         result = pipeline.process_pdf(
             str(input_path),
-            page_limit=args.max_pages
+            page_limit=args.max_pages,
+            output_dir=str(output_path.parent)
         )
         markdown = result['markdown']
         

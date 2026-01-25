@@ -84,6 +84,10 @@ class MarkdownGenerator:
     
     def _format_picture(self, element: Dict[str, Any]) -> str:
         """Format picture/figure"""
+        content = element.get('content', '')
+        # If content contains image hash placeholder, return it for later replacement
+        if content and content.startswith('__IMAGE__'):
+            return f"![Figure]\n\n{content}"
         return "![Figure]"
     
     def _format_caption(self, element: Dict[str, Any]) -> str:
