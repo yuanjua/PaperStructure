@@ -116,7 +116,7 @@ class PaperStructurePipeline:
     
     def process_image(self, image: Image.Image) -> List[Dict[str, Any]]:
         """
-        Process a single image
+        Process a single image with batched formula recognition
         
         Args:
             image: PIL Image
@@ -134,7 +134,11 @@ class PaperStructurePipeline:
         # For two-column layouts, we need to detect columns and sort within each
         layout_elements = self._sort_by_reading_order(layout_elements, image.width)
         
-        # Step 4: Extract content for each element
+        # Step 4: Collect formula regions for batch processing
+        formula_indices = []  # Track which elements are formulas
+        formula_images = []   # Cropped formula images
+        
+        # Step 5: Extract content for each element (defer formula recognition)
         structured_elements = []
         
         for element in layout_elements:
@@ -149,9 +153,12 @@ class PaperStructurePipeline:
             content = ""
             
             if element_type == 'Formula':
-                # Use formula recognizer
+                # Collect formula for batch processing
                 if self.formula_recognizer:
-                    content = self.formula_recognizer.recognize_region(image, bbox)
+                    formula_image = self.formula_recognizer.crop_region(image, bbox)
+                    formula_indices.append(len(structured_elements))
+                    formula_images.append(formula_image)
+                    content = "__FORMULA_PLACEHOLDER__"  # Will be replaced after batch
                 else:
                     content = "[Formula]"
                     
@@ -175,6 +182,12 @@ class PaperStructurePipeline:
                 'content': content,
                 'confidence': element['confidence']
             })
+        
+        # Step 6: Batch process all formulas at once
+        if formula_images and self.formula_recognizer:
+            formula_results = self.formula_recognizer.recognize_batch(formula_images)
+            for idx, latex_str in zip(formula_indices, formula_results):
+                structured_elements[idx]['content'] = latex_str
         
         return structured_elements
     
@@ -377,7 +390,7 @@ class PaperStructurePipeline:
         target_texts.sort(key=lambda x: x[0])
         return ' '.join(text for _, text in target_texts)
     
-    def process_pdf(self, pdf_path: str, page_limit: Optional[int] = None, parallel: bool = True, output_dir: Optional[str] = None) -> Dict[str, Any]:
+    def process_pdf(self, pdf_path: str, page_limit: Optional[int] = None, parallel: bool = True, output_dir: Optional[str] = None, max_workers: int = 8) -> Dict[str, Any]:
         """
         Process entire PDF with optional parallel processing
         
@@ -386,6 +399,7 @@ class PaperStructurePipeline:
             page_limit: Maximum number of pages to process (None = all)
             parallel: Enable parallel processing (one thread per page)
             output_dir: Directory to save extracted images (default: same as PDF)
+            max_workers: Maximum number of parallel workers (default: 8)
             
         Returns:
             Dictionary with pages and markdown output
@@ -401,52 +415,66 @@ class PaperStructurePipeline:
             self._image_output_dir = pdf_path_obj.parent
         
         if parallel:
-            return self._process_pdf_parallel(pdf_path, page_limit)
+            return self._process_pdf_parallel(pdf_path, page_limit, max_workers=max_workers)
         else:
             return self._process_pdf_sequential(pdf_path, page_limit)
     
-    def _process_pdf_parallel(self, pdf_path: str, page_limit: Optional[int] = None) -> Dict[str, Any]:
+    def _process_pdf_parallel(self, pdf_path: str, page_limit: Optional[int] = None, max_workers: int = 8) -> Dict[str, Any]:
         """
-        Process entire PDF in parallel, with one page per thread
+        Process entire PDF in parallel with memory-optimized on-the-fly rendering
         
         Args:
             pdf_path: Path to PDF file
             page_limit: Maximum number of pages to process (None = all)
+            max_workers: Maximum number of parallel workers (default: 8)
             
         Returns:
             Dictionary with pages and markdown output
         """
         print(f"Processing PDF in parallel: {pdf_path}")
         
-        # Load PDF and render all pages first
+        # Load PDF
         pdf = pdfium.PdfDocument(pdf_path)
         
         try:
             total_pages = len(pdf)
             pages_to_process = min(page_limit, total_pages) if page_limit is not None else total_pages
             
+            # Adjust max_workers based on page count
+            effective_workers = min(max_workers, pages_to_process)
+            
             print(f"  Total pages: {total_pages}")
-            print(f"  Processing: {pages_to_process} pages in parallel\n")
+            print(f"  Processing: {pages_to_process} pages (max {effective_workers} workers)\n")
             
             # Pre-allocate results array
             all_pages_results = [None] * pages_to_process
             
-            # Render all pages to PIL images first (must be done sequentially)
-            print("Rendering pages...")
-            images = []
-            for i in range(pages_to_process):
-                page = pdf[i]
-                pil_image = page.render(scale=2.0).to_pil()
-                images.append(pil_image)
-            pdf.close()
-            print(f"  Rendered {len(images)} pages\n")
+            # Memory-optimized: render and process pages on-the-fly
+            # Use a lock for thread-safe PDF page rendering
+            pdf_lock = threading.Lock()
             
-            # Process images concurrently with thread pool
-            print("Processing pages in parallel...")
-            with ThreadPoolExecutor() as executor:
+            def render_and_process_page(page_idx: int) -> Dict[str, Any]:
+                """Render a single page and process it (thread-safe)"""
+                # Thread-safe page rendering
+                with pdf_lock:
+                    page = pdf[page_idx]
+                    pil_image = page.render(scale=2.0).to_pil()
+                
+                # Process the image (can run in parallel)
+                elements = self.process_image(pil_image)
+                
+                return {
+                    'page_number': page_idx + 1,
+                    'elements': elements,
+                    'image': pil_image  # Keep for potential image extraction
+                }
+            
+            # Process pages concurrently with bounded thread pool
+            print("Processing pages in parallel (on-the-fly rendering)...")
+            with ThreadPoolExecutor(max_workers=effective_workers) as executor:
                 # Submit all tasks
                 future_to_page = {
-                    executor.submit(self._process_page_worker, images[i], i + 1): i 
+                    executor.submit(render_and_process_page, i): i 
                     for i in range(pages_to_process)
                 }
                 
@@ -459,6 +487,9 @@ class PaperStructurePipeline:
                         print(f"  ✓ Completed page {page_result['page_number']}")
                     except Exception as exc:
                         print(f"  ✗ Page {page_idx + 1} generated an exception: {exc}")
+            
+            # Close PDF after all pages are processed
+            pdf.close()
             
             # Filter out failed pages and ensure proper ordering
             processed_pages = [p for p in all_pages_results if p is not None]
@@ -492,32 +523,13 @@ class PaperStructurePipeline:
                     'processed_pages': len(processed_pages),
                     'total_elements': len(all_elements),
                     'extracted_images': len(hash_to_path),
-                    'parallel': True
+                    'parallel': True,
+                    'max_workers': effective_workers
                 }
             }
         except Exception as e:
             pdf.close()
             raise e
-    
-    def _process_page_worker(self, image: Image.Image, page_number: int) -> Dict[str, Any]:
-        """
-        Worker function for parallel page processing
-        
-        Args:
-            image: Rendered page image
-            page_number: Page number (1-indexed)
-            
-        Returns:
-            Dictionary with page number and extracted elements
-        """
-        # Process the image using the shared models
-        elements = self.process_image(image)
-        
-        return {
-            'page_number': page_number,
-            'elements': elements,
-            'image': image
-        }
     
     def _process_pdf_sequential(self, pdf_path: str, page_limit: Optional[int] = None) -> Dict[str, Any]:
         """
