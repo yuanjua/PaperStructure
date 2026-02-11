@@ -1,6 +1,6 @@
 # PaperStructure
 
-Extract formulas and content from academic papers and save as markdown.
+Extract formulas and content from academic papers and save as markdown. **Note** -- The tool is good for formula heavy documents. Low accuracy might be observed in vertical table recognition tasks.
 
 ## Features
 
@@ -10,6 +10,12 @@ Extract formulas and content from academic papers and save as markdown.
 - **Markdown Export** -- clean, readable markdown output
 - **Parallel Processing** -- multi-threaded PDF page processing
 
+## Demo
+
+| PDF | Markdown |  
+|-----------|-----------|  
+| <img width="597" height="813" alt="Screenshot 2026-02-11 at 21 54 00" src="https://github.com/user-attachments/assets/63532903-dbdd-4ae9-afd2-95d41833d4fa" /> | <img width="691" height="795" alt="Screenshot 2026-02-11 at 22 20 52" src="https://github.com/user-attachments/assets/15e955ab-9826-4f24-9a7a-64abf203e15d" /> |  
+ 
 ## Installation
 
 ```bash
