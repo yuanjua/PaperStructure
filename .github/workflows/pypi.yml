@@ -22,7 +22,7 @@ jobs:
         python-version: "3.x"
 
     - name: Build release distributions
-      run: >-
+      run: |
         python3 -m pip install --upgrade build
         python3 -m build
 
