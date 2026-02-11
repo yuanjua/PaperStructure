@@ -1,6 +1,6 @@
 [project]
 name = "paper-structure"
-version = "0.1.0"
+version = "0.1.1"
 description = "Extract structure and content from academic papers with AI-powered layout detection, OCR, and formula recognition."
 readme = "README.md"
 requires-python = ">=3.9"
