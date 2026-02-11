@@ -1,6 +1,6 @@
 # PaperStructure
 
-Extract formulas and content from academic papers and save as markdown. **Note** -- The tool is good for formula heavy documents. Low accuracy might be observed in vertical table recognition tasks.
+PaperStructure is a lightweight CLI tool designed to transform academic papers into clean, structured Markdown. By leveraging ONNX models, it delivers high-performance inference optimized for standard laptops. It is a reliable companion for formula-heavy research, though users may currently observe lower accuracy in vertical table recognition.
 
 ## Features
 
@@ -93,7 +93,7 @@ print(registry.status())    # show cache status
 
 ## Models
 
-All model weights are hosted at [`hpllduck/PaperStructure`](https://huggingface.co/hpllduck/PaperStructure) (~399 MB total) and cached locally via `huggingface_hub`.
+The tool automatically downloads models on its first call. All model weights are hosted at [`hpllduck/PaperStructure`](https://huggingface.co/hpllduck/PaperStructure) (~399 MB total) and cached locally via `huggingface_hub`.
 
 | Group | Files | Description |
 |-------|-------|-------------|
