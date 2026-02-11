@@ -5,97 +5,25 @@ Command Line Interface for Paper Structure Analysis
 import argparse
 import sys
 from pathlib import Path
-from .pipeline import PaperStructurePipeline
 
 
-def main():
-    """Main CLI entry point"""
-    parser = argparse.ArgumentParser(
-        description="Extract structure and content from academic papers",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  # Process a PDF and save to markdown
-  python -m paper_structure.cli input.pdf -o output.md
-  
-  # Process first 3 pages only
-  python -m paper_structure.cli input.pdf -o output.md --max-pages 3
-  
-  # Skip headers and footers
-  python -m paper_structure.cli input.pdf -o output.md --skip Page-header Page-footer
-  
-  # Disable formula recognition for faster processing
-  python -m paper_structure.cli input.pdf -o output.md --no-formulas
-        """
-    )
-    
-    # Input/Output
-    parser.add_argument(
-        'input',
-        type=str,
-        help='Input PDF file path'
-    )
-    parser.add_argument(
-        '-o', '--output',
-        type=str,
-        default=None,
-        help='Output markdown file path (default: <input>_output.md)'
-    )
-    
-    # Processing options
-    parser.add_argument(
-        '--max-pages',
-        type=int,
-        default=None,
-        help='Maximum number of pages to process (default: all pages)'
-    )
-    parser.add_argument(
-        '--skip',
-        nargs='+',
-        default=['Page-header', 'Page-footer'],
-        help='Element types to skip (default: Page-header Page-footer)'
-    )
-    parser.add_argument(
-        '--no-formulas',
-        action='store_true',
-        help='Disable formula recognition (faster but less accurate)'
-    )
-    
-    # Model options
-    parser.add_argument(
-        '--layout-model',
-        type=str,
-        default='yolox',
-        choices=['yolox', 'yolox_tiny', 'yolox_quantized'],
-        help='Layout detection model (default: yolox)'
-    )
-    
-    # Verbosity
-    parser.add_argument(
-        '-v', '--verbose',
-        action='store_true',
-        help='Enable verbose output'
-    )
-    
-    args = parser.parse_args()
-    
-    # Validate input file
+# ── Sub-commands ──────────────────────────────────────────────────────────
+
+def _cmd_process(args) -> int:
+    """Process a PDF and produce markdown."""
+    from .pipeline import PaperStructurePipeline
+
     input_path = Path(args.input)
     if not input_path.exists():
         print(f"Error: Input file '{args.input}' not found", file=sys.stderr)
         return 1
-    
+
     if not input_path.suffix.lower() == '.pdf':
         print(f"Error: Input file must be a PDF", file=sys.stderr)
         return 1
-    
-    # Determine output path
-    if args.output is None:
-        output_path = input_path.with_name(f"{input_path.stem}_output.md")
-    else:
-        output_path = Path(args.output)
-    
-    # Print configuration
+
+    output_path = Path(args.output) if args.output else input_path.with_name(f"{input_path.stem}_output.md")
+
     if args.verbose:
         print("=" * 70)
         print("Paper Structure Analysis CLI")
@@ -109,36 +37,30 @@ Examples:
             print(f"Max Pages: {args.max_pages}")
         print("=" * 70)
         print()
-    
+
     try:
-        # Initialize pipeline
         if args.verbose:
             print("Initializing pipeline...")
-        
+
         pipeline = PaperStructurePipeline(
             layout_model=args.layout_model,
             use_formula_recognition=not args.no_formulas,
             skip_types=args.skip
         )
-        
+
         if args.verbose:
-            print("Pipeline ready!")
-            print()
-        
-        # Process PDF
-        if args.verbose:
-            print(f"Processing PDF: {input_path.name}")
-        
+            print("Pipeline ready!\n")
+
         result = pipeline.process_pdf(
             str(input_path),
             page_limit=args.max_pages,
-            output_dir=str(output_path.parent)
+            output_dir=str(output_path.parent),
+            save_images=not args.no_images,
         )
         markdown = result['markdown']
-        
-        # Save output
+
         output_path.write_text(markdown, encoding='utf-8')
-        
+
         if args.verbose:
             print(f"\nMarkdown saved to: {output_path}")
             print(f"Total length: {len(markdown)} characters")
@@ -146,9 +68,9 @@ Examples:
             print("Processing complete!")
         else:
             print(f"Saved to: {output_path}")
-        
+
         return 0
-        
+
     except KeyboardInterrupt:
         print("\n\nInterrupted by user", file=sys.stderr)
         return 130
@@ -158,6 +80,210 @@ Examples:
             import traceback
             traceback.print_exc()
         return 1
+
+
+def _cmd_preview(args) -> int:
+    """Process a PDF and generate an annotated preview PDF."""
+    from .pipeline import PaperStructurePipeline
+    from .preview import generate_preview
+
+    input_path = Path(args.input)
+    if not input_path.exists():
+        print(f"Error: Input file '{args.input}' not found", file=sys.stderr)
+        return 1
+
+    if not input_path.suffix.lower() == '.pdf':
+        print(f"Error: Input file must be a PDF", file=sys.stderr)
+        return 1
+
+    output_path = Path(args.output) if args.output else input_path.with_name(f"{input_path.stem}_preview.pdf")
+
+    if args.verbose:
+        print("=" * 70)
+        print("Paper Structure Preview")
+        print("=" * 70)
+        print(f"Input:  {input_path}")
+        print(f"Output: {output_path}")
+        print(f"Layout Model: {args.layout_model}")
+        print(f"Formula Recognition: {'Enabled' if not args.no_formulas else 'Disabled'}")
+        if args.max_pages:
+            print(f"Max Pages: {args.max_pages}")
+        print("=" * 70)
+        print()
+
+    try:
+        if args.verbose:
+            print("Initializing pipeline...")
+
+        pipeline = PaperStructurePipeline(
+            layout_model=args.layout_model,
+            use_formula_recognition=not args.no_formulas,
+        )
+
+        if args.verbose:
+            print("Running detection...\n")
+
+        result = pipeline.process_pdf(
+            str(input_path),
+            page_limit=args.max_pages,
+            output_dir=str(output_path.parent),
+            save_images=False,
+        )
+
+        if args.verbose:
+            print("\nGenerating preview PDF...")
+
+        generate_preview(result, str(output_path), verbose=args.verbose)
+
+        if args.verbose:
+            print("=" * 70)
+            print("Preview complete!")
+        else:
+            print(f"Saved to: {output_path}")
+
+        return 0
+
+    except KeyboardInterrupt:
+        print("\n\nInterrupted by user", file=sys.stderr)
+        return 130
+    except Exception as e:
+        print(f"\nError: {e}", file=sys.stderr)
+        if args.verbose:
+            import traceback
+            traceback.print_exc()
+        return 1
+
+
+def _cmd_models(args) -> int:
+    """Manage model weights."""
+    from .models import registry
+
+    action = args.action
+
+    if action == "status":
+        print(registry.status())
+        return 0
+
+    if action == "download":
+        if args.group:
+            print(f"Downloading model group: {args.group}")
+            try:
+                registry.ensure_group(args.group)
+                print("Done.")
+            except KeyError as e:
+                print(f"Error: {e}", file=sys.stderr)
+                return 1
+        else:
+            print("Downloading all models...")
+            registry.ensure_all()
+            print("Done.")
+        return 0
+
+    print(f"Unknown action: {action}", file=sys.stderr)
+    return 1
+
+
+# ── Main parser ───────────────────────────────────────────────────────────
+
+def main():
+    """Main CLI entry point"""
+    parser = argparse.ArgumentParser(
+        description="Paper Structure – academic paper analysis toolkit",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    subparsers = parser.add_subparsers(dest="command", help="Available commands")
+
+    # ── process ──
+    p_process = subparsers.add_parser(
+        "process",
+        help="Process a PDF and produce markdown",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  paper-structure process input.pdf -o output.md
+  paper-structure process input.pdf -o output.md --max-pages 3
+  paper-structure process input.pdf --no-formulas
+        """,
+    )
+    p_process.add_argument('input', type=str, help='Input PDF file path')
+    p_process.add_argument('-o', '--output', type=str, default=None,
+                           help='Output markdown file path (default: <input>_output.md)')
+    p_process.add_argument('--max-pages', type=int, default=None,
+                           help='Maximum number of pages to process')
+    p_process.add_argument('--skip', nargs='+', default=['Page-header', 'Page-footer'],
+                           help='Element types to skip')
+    p_process.add_argument('--no-formulas', action='store_true',
+                           help='Disable formula recognition')
+    p_process.add_argument('--no-images', action='store_true',
+                           help='Do not save extracted images to disk')
+    p_process.add_argument('--layout-model', type=str, default='yolox',
+                           choices=['yolox', 'yolox_tiny', 'yolox_quantized'],
+                           help='Layout detection model (default: yolox)')
+    p_process.add_argument('-v', '--verbose', action='store_true',
+                           help='Enable verbose output')
+    p_process.set_defaults(func=_cmd_process)
+
+    # ── models ──
+    p_models = subparsers.add_parser(
+        "models",
+        help="Manage model weights (download, check status)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  paper-structure models status
+  paper-structure models download
+  paper-structure models download --group latex_ocr
+        """,
+    )
+    p_models.add_argument('action', choices=['status', 'download'],
+                          help='Action to perform')
+    p_models.add_argument('--group', type=str, default=None,
+                          help='Model group to download (default: all)')
+    p_models.set_defaults(func=_cmd_models)
+
+    # ── preview ──
+    p_preview = subparsers.add_parser(
+        "preview",
+        help="Process a PDF and generate an annotated preview PDF with bounding boxes",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  paper-structure preview input.pdf -o preview.pdf
+  paper-structure preview input.pdf --max-pages 3 -v
+  paper-structure preview input.pdf --no-formulas
+        """,
+    )
+    p_preview.add_argument('input', type=str, help='Input PDF file path')
+    p_preview.add_argument('-o', '--output', type=str, default=None,
+                           help='Output preview PDF path (default: <input>_preview.pdf)')
+    p_preview.add_argument('--max-pages', type=int, default=None,
+                           help='Maximum number of pages to process')
+    p_preview.add_argument('--no-formulas', action='store_true',
+                           help='Disable formula recognition')
+    p_preview.add_argument('--layout-model', type=str, default='yolox',
+                           choices=['yolox'],
+                           help='Layout detection model (default: yolox)')
+    p_preview.add_argument('-v', '--verbose', action='store_true',
+                           help='Enable verbose output')
+    p_preview.set_defaults(func=_cmd_preview)
+
+    # ── backwards compat: bare positional arg = process ──
+    # Detect legacy usage like `cli.py input.pdf -o output.md`
+    # before argparse swallows the error on unknown subcommand.
+    argv = sys.argv[1:]
+    if argv and argv[0] not in ('process', 'models', 'preview', '-h', '--help') and not argv[0].startswith('-'):
+        # Looks like a bare file path – treat as `process <args>`
+        argv_with_cmd = ['process'] + argv
+        args = parser.parse_args(argv_with_cmd)
+        return args.func(args)
+
+    args = parser.parse_args()
+
+    if args.command is None:
+        parser.print_help()
+        return 1
+
+    return args.func(args)
 
 
 if __name__ == '__main__':

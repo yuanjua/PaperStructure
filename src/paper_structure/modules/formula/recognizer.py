@@ -3,14 +3,11 @@ Formula Recognition Module
 Using extracted LaTeX OCR library with GPU/TensorRT support
 """
 
-from pathlib import Path
-from typing import List, Tuple, Dict, Any
+from typing import List, Optional
 
-import numpy as np
 from PIL import Image
 
 from paper_structure.libs.latex_ocr import LaTeXOCR
-from paper_structure.libs.latex_ocr.config import LaTeXOCRConfig
 
 
 class FormulaRecognizer:
@@ -102,7 +99,7 @@ class FormulaRecognizer:
         # Recognize formula
         return self.recognize(region)
     
-    def crop_region(self, image: Image.Image, bbox: List[int]) -> Image.Image:
+    def crop_region(self, image: Image.Image, bbox: List[int]) -> Optional[Image.Image]:
         """
         Crop a formula region from image with padding
         

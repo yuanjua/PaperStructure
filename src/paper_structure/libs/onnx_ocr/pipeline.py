@@ -6,13 +6,11 @@ Combines the three modular stages into a simple interface similar to ONNXPaddleO
 from pathlib import Path
 from typing import List, Tuple, Optional
 import numpy as np
-
 from .text_detector import TextDetector
 from .text_classifier import TextClassifier
 from .text_recognizer import TextRecognizer
 from .config import DetectorConfig, ClassifierConfig, RecognizerConfig
 from .utils import get_rotate_crop_image, sorted_boxes
-
 
 class OCRPipeline:
     """
@@ -50,17 +48,17 @@ class OCRPipeline:
         """
         self.use_angle_cls = use_angle_cls
         
-        # Get default model paths if not provided
-        models_dir = Path(__file__).parent / "models"
-        
-        if det_model_path is None:
-            det_model_path = models_dir / "det" / "det.onnx"
-        if cls_model_path is None:
-            cls_model_path = models_dir / "cls" / "cls.onnx"
-        if rec_model_path is None:
-            rec_model_path = models_dir / "rec" / "rec.onnx"
-        if char_dict_path is None:
-            char_dict_path = models_dir / "ppocrv5_dict.txt"
+        # Resolve default model paths via unified registry
+        if any(p is None for p in [det_model_path, cls_model_path, rec_model_path, char_dict_path]):
+            from paper_structure.models import registry
+            if det_model_path is None:
+                det_model_path = registry.get("paddle_ocr", "detector")
+            if cls_model_path is None:
+                cls_model_path = registry.get("paddle_ocr", "classifier")
+            if rec_model_path is None:
+                rec_model_path = registry.get("paddle_ocr", "recognizer")
+            if char_dict_path is None:
+                char_dict_path = registry.get("paddle_ocr", "dictionary")
         
         # Validate model files exist
         for path, name in [
@@ -137,11 +135,7 @@ class OCRPipeline:
             
             Where box_coordinates is a list of 4 points: [[x1,y1], [x2,y2], [x3,y3], [x4,y4]]
         """
-        if cls and self.use_angle_cls == False:
-            print(
-                "Since the angle classifier is not initialized, "
-                "the angle classifier will not be used during the forward process"
-            )
+        if cls and not self.use_angle_cls:
             cls = False
         
         if det and rec:

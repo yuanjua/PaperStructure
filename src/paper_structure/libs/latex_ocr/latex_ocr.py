@@ -13,13 +13,12 @@ from .models import EncoderDecoder
 from .onnx_session import OrtInferSession
 from .preprocess import PreProcess
 from .tokenizer import TokenizerCls
-from .utils import ModelDownloader
 
 
 class LaTeXOCR:
     """LaTeX OCR for formula recognition with GPU/TensorRT support.
     
-    Automatically downloads models on first use from GitHub releases.
+    Automatically downloads models on first use via the model registry.
     Supports hardware acceleration: TensorRT > CUDA > CPU
     """
     
@@ -51,12 +50,12 @@ class LaTeXOCR:
         self.use_gpu = use_gpu
         self.use_tensorrt = use_tensorrt
         
-        # Download and get model paths
+        # Resolve model paths (download via registry if not provided)
         self.image_resizer_path = image_resizer_path
         self.encoder_path = encoder_path
         self.decoder_path = decoder_path
         self.tokenizer_json = tokenizer_json
-        self._get_model_paths()
+        self._resolve_model_paths()
         
         # Initialize components
         self.max_dims = [config.max_width, config.max_height]
@@ -83,28 +82,21 @@ class LaTeXOCR:
         
         self.tokenizer = TokenizerCls(self.tokenizer_json)
     
-    def _get_model_paths(self):
-        """Download models if needed and get their paths."""
-        downloader = ModelDownloader()
-        
-        # Model file names
-        decoder_name = "decoder.onnx"
-        encoder_name = "encoder.onnx"
-        resizer_name = "image_resizer.onnx"
-        tokenizer_name = "tokenizer.json"
-        
-        # Download if paths not provided
+    def _resolve_model_paths(self):
+        """Resolve model paths via the unified registry (downloads if needed)."""
+        from paper_structure.models import registry
+
         if self.image_resizer_path is None:
-            self.image_resizer_path = downloader.download(resizer_name)
+            self.image_resizer_path = registry.get("latex_ocr", "image_resizer")
         
         if self.encoder_path is None:
-            self.encoder_path = downloader.download(encoder_name)
+            self.encoder_path = registry.get("latex_ocr", "encoder")
         
         if self.decoder_path is None:
-            self.decoder_path = downloader.download(decoder_name)
+            self.decoder_path = registry.get("latex_ocr", "decoder")
         
         if self.tokenizer_json is None:
-            self.tokenizer_json = downloader.download(tokenizer_name)
+            self.tokenizer_json = registry.get("latex_ocr", "tokenizer")
     
     def __call__(self, img: Union[np.ndarray, Image.Image, str, Path]) -> Tuple[str, float]:
         """Recognize LaTeX formula from image.

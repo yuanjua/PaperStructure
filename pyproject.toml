@@ -1,11 +1,10 @@
 [project]
-name = "paper_structure"
+name = "paper-structure"
 version = "0.1.0"
-description = "Add your description here"
+description = "Extract structure and content from academic papers with AI-powered layout detection, OCR, and formula recognition."
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
-    "pip",
     "numpy>1.24.4",
     "opencv-python>=4.5.0",
     "onnxruntime>=1.10.0",
@@ -19,3 +18,6 @@ dependencies = [
     "requests>=2.25.0",
     "tqdm>=4.60.0",
 ]
+
+[project.scripts]
+paper-structure = "paper_structure.cli:main"

@@ -19,6 +19,7 @@ class MarkdownGenerator:
             'Table': self._format_table,
             'Formula': self._format_formula,
             'Picture': self._format_picture,
+            'Figure': self._format_picture,
             'Caption': self._format_caption,
             'Page-header': self._format_header,
             'Page-footer': self._format_footer,

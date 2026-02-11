@@ -3,7 +3,6 @@ Layout Detection Module
 Uses YOLOX for document layout analysis with hardware acceleration
 """
 
-import numpy as np
 from PIL import Image
 from typing import List, Dict, Any
 from paper_structure.libs.yolox import get_model

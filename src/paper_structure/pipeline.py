@@ -4,6 +4,7 @@ Orchestrates layout detection, text recognition, and content extraction
 """
 
 import hashlib
+import io
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -215,7 +216,6 @@ class PaperStructurePipeline:
         region = image.crop((x1, y1, x2, y2))
         
         # Generate hash from image content for unique filename
-        import io
         img_bytes = io.BytesIO()
         region.save(img_bytes, format='JPEG', quality=95)
         img_hash = hashlib.sha256(img_bytes.getvalue()).hexdigest()
@@ -354,6 +354,15 @@ class PaperStructurePipeline:
         
         return sorted_result
     
+    @staticmethod
+    def _replace_image_placeholders(markdown: str, hash_to_path: Dict[str, str]) -> str:
+        """Replace image hash placeholders in markdown with actual paths."""
+        for img_hash, img_path in hash_to_path.items():
+            placeholder = f"__IMAGE__{img_hash}__"
+            markdown = markdown.replace(f"![Figure]\n\n{placeholder}", f"![]({img_path})")
+            markdown = markdown.replace(placeholder, f"![]({img_path})")
+        return markdown
+    
     def _extract_text_from_bbox(self, ocr_results: List[Dict[str, Any]], target_bbox: List[int]) -> str:
         """
         Extract text that overlaps with target bbox from OCR results
@@ -390,7 +399,7 @@ class PaperStructurePipeline:
         target_texts.sort(key=lambda x: x[0])
         return ' '.join(text for _, text in target_texts)
     
-    def process_pdf(self, pdf_path: str, page_limit: Optional[int] = None, parallel: bool = True, output_dir: Optional[str] = None, max_workers: int = 8) -> Dict[str, Any]:
+    def process_pdf(self, pdf_path: str, page_limit: Optional[int] = None, parallel: bool = True, output_dir: Optional[str] = None, max_workers: int = 8, save_images: bool = True) -> Dict[str, Any]:
         """
         Process entire PDF with optional parallel processing
         
@@ -400,6 +409,7 @@ class PaperStructurePipeline:
             parallel: Enable parallel processing (one thread per page)
             output_dir: Directory to save extracted images (default: same as PDF)
             max_workers: Maximum number of parallel workers (default: 8)
+            save_images: Whether to save extracted images to disk (default: True)
             
         Returns:
             Dictionary with pages and markdown output
@@ -415,11 +425,11 @@ class PaperStructurePipeline:
             self._image_output_dir = pdf_path_obj.parent
         
         if parallel:
-            return self._process_pdf_parallel(pdf_path, page_limit, max_workers=max_workers)
+            return self._process_pdf_parallel(pdf_path, page_limit, max_workers=max_workers, save_images=save_images)
         else:
-            return self._process_pdf_sequential(pdf_path, page_limit)
+            return self._process_pdf_sequential(pdf_path, page_limit, save_images=save_images)
     
-    def _process_pdf_parallel(self, pdf_path: str, page_limit: Optional[int] = None, max_workers: int = 8) -> Dict[str, Any]:
+    def _process_pdf_parallel(self, pdf_path: str, page_limit: Optional[int] = None, max_workers: int = 8, save_images: bool = True) -> Dict[str, Any]:
         """
         Process entire PDF in parallel with memory-optimized on-the-fly rendering
         
@@ -470,7 +480,7 @@ class PaperStructurePipeline:
                 }
             
             # Process pages concurrently with bounded thread pool
-            print("Processing pages in parallel (on-the-fly rendering)...")
+            print("Processing pages...")
             with ThreadPoolExecutor(max_workers=effective_workers) as executor:
                 # Submit all tasks
                 future_to_page = {
@@ -498,8 +508,11 @@ class PaperStructurePipeline:
             print(f"\nSuccessfully processed {len(processed_pages)}/{pages_to_process} pages")
             
             # Save extracted images and get path mapping
-            print("Saving extracted images...")
-            hash_to_path = self._save_extracted_images(self._image_output_dir)
+            if save_images:
+                print("Saving extracted images...")
+                hash_to_path = self._save_extracted_images(self._image_output_dir)
+            else:
+                hash_to_path = {}
             
             # Generate markdown
             print("Generating markdown...")
@@ -508,12 +521,7 @@ class PaperStructurePipeline:
                 all_elements.extend(page['elements'])
             
             markdown = self.markdown_generator.generate(all_elements)
-            
-            # Replace image placeholders with actual paths
-            for img_hash, img_path in hash_to_path.items():
-                placeholder = f"__IMAGE__{img_hash}__"
-                markdown = markdown.replace(f"![Figure]\n\n{placeholder}", f"![](images/{img_hash}.jpg)")
-                markdown = markdown.replace(placeholder, f"![](images/{img_hash}.jpg)")
+            markdown = self._replace_image_placeholders(markdown, hash_to_path)
             
             return {
                 'pages': processed_pages,
@@ -527,11 +535,10 @@ class PaperStructurePipeline:
                     'max_workers': effective_workers
                 }
             }
-        except Exception as e:
+        finally:
             pdf.close()
-            raise e
     
-    def _process_pdf_sequential(self, pdf_path: str, page_limit: Optional[int] = None) -> Dict[str, Any]:
+    def _process_pdf_sequential(self, pdf_path: str, page_limit: Optional[int] = None, save_images: bool = True) -> Dict[str, Any]:
         """
         Process entire PDF sequentially (original implementation)
         
@@ -576,8 +583,11 @@ class PaperStructurePipeline:
                 print(f"  Detected {len(elements)} elements\n")
             
             # Save extracted images and get path mapping
-            print("Saving extracted images...")
-            hash_to_path = self._save_extracted_images(self._image_output_dir)
+            if save_images:
+                print("Saving extracted images...")
+                hash_to_path = self._save_extracted_images(self._image_output_dir)
+            else:
+                hash_to_path = {}
             
             # Generate markdown
             print("Generating markdown...")
@@ -586,12 +596,7 @@ class PaperStructurePipeline:
                 all_elements.extend(page['elements'])
             
             markdown = self.markdown_generator.generate(all_elements)
-            
-            # Replace image placeholders with actual paths
-            for img_hash, img_path in hash_to_path.items():
-                placeholder = f"__IMAGE__{img_hash}__"
-                markdown = markdown.replace(f"![Figure]\n\n{placeholder}", f"![](images/{img_hash}.jpg)")
-                markdown = markdown.replace(placeholder, f"![](images/{img_hash}.jpg)")
+            markdown = self._replace_image_placeholders(markdown, hash_to_path)
             
             return {
                 'pages': all_pages,

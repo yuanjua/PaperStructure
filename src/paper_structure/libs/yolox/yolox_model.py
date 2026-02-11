@@ -11,7 +11,13 @@ from PIL import Image as PILImage
 
 from .constants import ElementType, Source
 from .layoutelement import LayoutElements
-from .utils import LazyDict, LazyEvaluateInfo, download_if_needed_and_get_local_path
+from .utils import LazyDict, LazyEvaluateInfo
+
+
+def _resolve_yolox_model(file_key: str) -> str:
+    """Resolve a YOLOX model path via the unified registry."""
+    from paper_structure.models import registry
+    return str(registry.get("yolox", file_key))
 
 
 YOLOX_LABEL_MAP = {
@@ -30,27 +36,15 @@ YOLOX_LABEL_MAP = {
 
 MODEL_TYPES = {
     "yolox": LazyDict(
-        model_path=LazyEvaluateInfo(
-            download_if_needed_and_get_local_path,
-            "unstructuredio/yolo_x_layout",
-            "yolox_l0.05.onnx",
-        ),
+        model_path=LazyEvaluateInfo(_resolve_yolox_model, "yolox"),
         label_map=YOLOX_LABEL_MAP,
     ),
     "yolox_tiny": LazyDict(
-        model_path=LazyEvaluateInfo(
-            download_if_needed_and_get_local_path,
-            "unstructuredio/yolo_x_layout",
-            "yolox_tiny.onnx",
-        ),
+        model_path=LazyEvaluateInfo(_resolve_yolox_model, "yolox_tiny"),
         label_map=YOLOX_LABEL_MAP,
     ),
     "yolox_quantized": LazyDict(
-        model_path=LazyEvaluateInfo(
-            download_if_needed_and_get_local_path,
-            "unstructuredio/yolo_x_layout",
-            "yolox_l0.05_quantized.onnx",
-        ),
+        model_path=LazyEvaluateInfo(_resolve_yolox_model, "yolox_quantized"),
         label_map=YOLOX_LABEL_MAP,
     ),
 }
