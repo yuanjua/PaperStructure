@@ -399,7 +399,7 @@ class PaperStructurePipeline:
         target_texts.sort(key=lambda x: x[0])
         return ' '.join(text for _, text in target_texts)
     
-    def process_pdf(self, pdf_path: str, page_limit: Optional[int] = None, parallel: bool = True, output_dir: Optional[str] = None, max_workers: int = 8, save_images: bool = True) -> Dict[str, Any]:
+    def process_pdf(self, pdf_path: str, page_limit: Optional[int] = None, parallel: bool = True, output_dir: Optional[str] = None, max_workers: int = 8) -> Dict[str, Any]:
         """
         Process entire PDF with optional parallel processing
         
@@ -409,7 +409,6 @@ class PaperStructurePipeline:
             parallel: Enable parallel processing (one thread per page)
             output_dir: Directory to save extracted images (default: same as PDF)
             max_workers: Maximum number of parallel workers (default: 8)
-            save_images: Whether to save extracted images to disk (default: True)
             
         Returns:
             Dictionary with pages and markdown output
@@ -425,11 +424,11 @@ class PaperStructurePipeline:
             self._image_output_dir = pdf_path_obj.parent
         
         if parallel:
-            return self._process_pdf_parallel(pdf_path, page_limit, max_workers=max_workers, save_images=save_images)
+            return self._process_pdf_parallel(pdf_path, page_limit, max_workers=max_workers)
         else:
-            return self._process_pdf_sequential(pdf_path, page_limit, save_images=save_images)
+            return self._process_pdf_sequential(pdf_path, page_limit)
     
-    def _process_pdf_parallel(self, pdf_path: str, page_limit: Optional[int] = None, max_workers: int = 8, save_images: bool = True) -> Dict[str, Any]:
+    def _process_pdf_parallel(self, pdf_path: str, page_limit: Optional[int] = None, max_workers: int = 8) -> Dict[str, Any]:
         """
         Process entire PDF in parallel with memory-optimized on-the-fly rendering
         
@@ -507,13 +506,6 @@ class PaperStructurePipeline:
             
             print(f"\nSuccessfully processed {len(processed_pages)}/{pages_to_process} pages")
             
-            # Save extracted images and get path mapping
-            if save_images:
-                print("Saving extracted images...")
-                hash_to_path = self._save_extracted_images(self._image_output_dir)
-            else:
-                hash_to_path = {}
-            
             # Generate markdown
             print("Generating markdown...")
             all_elements = []
@@ -521,7 +513,6 @@ class PaperStructurePipeline:
                 all_elements.extend(page['elements'])
             
             markdown = self.markdown_generator.generate(all_elements)
-            markdown = self._replace_image_placeholders(markdown, hash_to_path)
             
             return {
                 'pages': processed_pages,
@@ -530,7 +521,6 @@ class PaperStructurePipeline:
                     'total_pages': total_pages,
                     'processed_pages': len(processed_pages),
                     'total_elements': len(all_elements),
-                    'extracted_images': len(hash_to_path),
                     'parallel': True,
                     'max_workers': effective_workers
                 }
@@ -538,7 +528,7 @@ class PaperStructurePipeline:
         finally:
             pdf.close()
     
-    def _process_pdf_sequential(self, pdf_path: str, page_limit: Optional[int] = None, save_images: bool = True) -> Dict[str, Any]:
+    def _process_pdf_sequential(self, pdf_path: str, page_limit: Optional[int] = None) -> Dict[str, Any]:
         """
         Process entire PDF sequentially (original implementation)
         
@@ -582,13 +572,6 @@ class PaperStructurePipeline:
                 
                 print(f"  Detected {len(elements)} elements\n")
             
-            # Save extracted images and get path mapping
-            if save_images:
-                print("Saving extracted images...")
-                hash_to_path = self._save_extracted_images(self._image_output_dir)
-            else:
-                hash_to_path = {}
-            
             # Generate markdown
             print("Generating markdown...")
             all_elements = []
@@ -596,7 +579,6 @@ class PaperStructurePipeline:
                 all_elements.extend(page['elements'])
             
             markdown = self.markdown_generator.generate(all_elements)
-            markdown = self._replace_image_placeholders(markdown, hash_to_path)
             
             return {
                 'pages': all_pages,
@@ -605,23 +587,32 @@ class PaperStructurePipeline:
                     'total_pages': total_pages,
                     'processed_pages': pages_to_process,
                     'total_elements': len(all_elements),
-                    'extracted_images': len(hash_to_path),
                     'parallel': False
                 }
             }
         finally:
             pdf.close()
     
-    def save_markdown(self, result: Dict[str, Any], output_path: str):
+    def save_markdown(self, result: Dict[str, Any], output_path: str, save_images: bool = False):
         """
-        Save markdown to file
+        Save markdown to file, optionally saving extracted images alongside it.
         
         Args:
             result: Result from process_pdf
             output_path: Path to save markdown file
+            save_images: Save extracted images to an ``images/`` directory
+                         next to the output file (default: False)
         """
+        output_dir = Path(output_path).parent
+        markdown = result['markdown']
+
+        if save_images and self._extracted_images:
+            print("Saving extracted images...")
+            hash_to_path = self._save_extracted_images(output_dir)
+            markdown = self._replace_image_placeholders(markdown, hash_to_path)
+
         with open(output_path, 'w', encoding='utf-8') as f:
-            f.write(result['markdown'])
+            f.write(markdown)
         print(f"Saved markdown to: {output_path}")
     
     def __repr__(self):

@@ -55,19 +55,14 @@ def _cmd_process(args) -> int:
             str(input_path),
             page_limit=args.max_pages,
             output_dir=str(output_path.parent),
-            save_images=not args.no_images,
         )
-        markdown = result['markdown']
 
-        output_path.write_text(markdown, encoding='utf-8')
+        pipeline.save_markdown(result, str(output_path), save_images=args.save_images)
 
         if args.verbose:
-            print(f"\nMarkdown saved to: {output_path}")
-            print(f"Total length: {len(markdown)} characters")
+            print(f"Total length: {len(result['markdown'])} characters")
             print("=" * 70)
             print("Processing complete!")
-        else:
-            print(f"Saved to: {output_path}")
 
         return 0
 
@@ -127,7 +122,6 @@ def _cmd_preview(args) -> int:
             str(input_path),
             page_limit=args.max_pages,
             output_dir=str(output_path.parent),
-            save_images=False,
         )
 
         if args.verbose:
@@ -214,8 +208,8 @@ Examples:
                            help='Element types to skip')
     p_process.add_argument('--no-formulas', action='store_true',
                            help='Disable formula recognition')
-    p_process.add_argument('--no-images', action='store_true',
-                           help='Do not save extracted images to disk')
+    p_process.add_argument('--save-images', action='store_true',
+                           help='Save extracted images to an images/ directory')
     p_process.add_argument('--layout-model', type=str, default='yolox',
                            choices=['yolox', 'yolox_tiny', 'yolox_quantized'],
                            help='Layout detection model (default: yolox)')

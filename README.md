@@ -19,7 +19,7 @@ PaperStructure is a lightweight CLI tool designed to transform academic papers i
 ## Installation
 
 ```bash
-pip install -e .
+pip install paper-structure
 ```
 
 This registers the `paper-structure` CLI and installs the Python package.
@@ -33,8 +33,11 @@ paper-structure process paper.pdf -o output.md
 # Shorthand also works:
 paper-structure paper.pdf -o output.md
 
-# Process first 5 pages, verbose, no images to save to disk
-paper-structure process paper.pdf -o output.md --max-pages 5 -v --no-images
+# Process first 5 pages, verbose
+paper-structure process paper.pdf -o output.md --max-pages 5 -v
+
+# Also save extracted images to an images/ directory
+paper-structure process paper.pdf -o output.md --save-images
 
 # Generate annotated preview PDF with bounding boxes
 paper-structure preview paper.pdf -o preview.pdf
@@ -55,8 +58,11 @@ result = pipeline.process_pdf("paper.pdf")
 # Markdown string
 print(result["markdown"])
 
-# Save to file
+# Save to file (images not saved by default)
 pipeline.save_markdown(result, "output.md")
+
+# Save with extracted images alongside
+pipeline.save_markdown(result, "output.md", save_images=True)
 
 # Structured page data
 for page in result["pages"]:
