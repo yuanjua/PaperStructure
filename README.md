@@ -1,6 +1,6 @@
 # PaperStructure
 
-PaperStructure is a lightweight CLI tool designed to transform academic papers into clean, structured Markdown. By leveraging ONNX models, it delivers high-performance inference optimized for standard laptops. It is a reliable companion for formula-heavy research, though users may currently observe lower accuracy in vertical table recognition.
+PaperStructure is a lightweight CLI tool designed to transform academic papers into clean, structured Markdown. By leveraging ONNX models, it delivers high-performance inference optimized for standard laptops. It is a reliable companion for formula-heavy research, though users may currently observe **lower accuracy** in table recognition.
 
 ## Features
 
@@ -27,65 +27,54 @@ This registers the `paper-structure` CLI and installs the Python package.
 ## CLI Usage
 
 ```bash
-# Process a PDF
+# Process a PDF (full pipeline: layout + OCR + formula)
 paper-structure process paper.pdf -o output.md
 
-# Shorthand also works:
+# Shorthand:
 paper-structure paper.pdf -o output.md
 
-# Process first 5 pages, verbose
-paper-structure process paper.pdf -o output.md --max-pages 5 -v
+# OCR an image (text recognition, no layout detection)
+paper-structure process photo.png -o output.txt
 
-# Also save extracted images to an images/ directory
-paper-structure process paper.pdf -o output.md --save-images
+# Recognize a formula image as LaTeX
+paper-structure process formula.png --formula
+
+# PDF options
+paper-structure process paper.pdf --max-pages 5 -v --save-images
 
 # Generate annotated preview PDF with bounding boxes
 paper-structure preview paper.pdf -o preview.pdf
 
 # Manage models
-paper-structure models status      # show what's downloaded
-paper-structure models download    # pre-download all models
+paper-structure models status
+paper-structure models download
 ```
 
 ## Python API
+
+### PDF processing (full pipeline)
 
 ```python
 from paper_structure import PaperStructurePipeline
 
 pipeline = PaperStructurePipeline()
 result = pipeline.process_pdf("paper.pdf")
-
-# Markdown string
 print(result["markdown"])
-
-# Save to file (images not saved by default)
 pipeline.save_markdown(result, "output.md")
-
-# Save with extracted images alongside
-pipeline.save_markdown(result, "output.md", save_images=True)
-
-# Structured page data
-for page in result["pages"]:
-    for elem in page["elements"]:
-        print(elem["type"], elem["content"][:80])
 ```
 
-### Options
+### Image OCR
 
 ```python
-pipeline = PaperStructurePipeline(
-    layout_model="yolox",              # layout detection model
-    use_formula_recognition=True,      # enable LaTeX formula OCR
-    skip_types=["Page-header", "Page-footer"],
-    use_gpu=False,                     # CUDA acceleration for OCR
-    use_dml=False,                     # DirectML (Windows)
-)
+from paper_structure import OCR
 
-result = pipeline.process_pdf(
-    "paper.pdf",
-    page_limit=5,                      # max pages to process
-    max_workers=8,                     # parallel threads
-)
+ocr = OCR()
+
+# Text recognition (default)
+print(ocr("table.png"))
+
+# LaTeX formula recognition
+print(ocr("formula.png", formula=True))
 ```
 
 ### Model Management

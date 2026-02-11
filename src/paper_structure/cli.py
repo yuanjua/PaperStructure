@@ -6,65 +6,37 @@ import argparse
 import sys
 from pathlib import Path
 
+_IMAGE_EXTS = {'.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.tif', '.webp'}
+
 
 # ── Sub-commands ──────────────────────────────────────────────────────────
 
 def _cmd_process(args) -> int:
-    """Process a PDF and produce markdown."""
-    from .pipeline import PaperStructurePipeline
-
+    """Process a PDF or image and produce markdown / text."""
     input_path = Path(args.input)
     if not input_path.exists():
         print(f"Error: Input file '{args.input}' not found", file=sys.stderr)
         return 1
 
-    if not input_path.suffix.lower() == '.pdf':
-        print(f"Error: Input file must be a PDF", file=sys.stderr)
-        return 1
+    ext = input_path.suffix.lower()
+    is_image = ext in _IMAGE_EXTS
 
-    output_path = Path(args.output) if args.output else input_path.with_name(f"{input_path.stem}_output.md")
-
-    if args.verbose:
-        print("=" * 70)
-        print("Paper Structure Analysis CLI")
-        print("=" * 70)
-        print(f"Input:  {input_path}")
-        print(f"Output: {output_path}")
-        print(f"Layout Model: {args.layout_model}")
-        print(f"Formula Recognition: {'Enabled' if not args.no_formulas else 'Disabled'}")
-        print(f"Skip Types: {', '.join(args.skip)}")
-        if args.max_pages:
-            print(f"Max Pages: {args.max_pages}")
-        print("=" * 70)
-        print()
+    output_path = Path(args.output) if args.output else input_path.with_name(
+        f"{input_path.stem}_output.{'txt' if is_image else 'md'}"
+    )
 
     try:
-        if args.verbose:
-            print("Initializing pipeline...")
-
-        pipeline = PaperStructurePipeline(
-            layout_model=args.layout_model,
-            use_formula_recognition=not args.no_formulas,
-            skip_types=args.skip
-        )
-
-        if args.verbose:
-            print("Pipeline ready!\n")
-
-        result = pipeline.process_pdf(
-            str(input_path),
-            page_limit=args.max_pages,
-            output_dir=str(output_path.parent),
-        )
-
-        pipeline.save_markdown(result, str(output_path), save_images=args.save_images)
-
-        if args.verbose:
-            print(f"Total length: {len(result['markdown'])} characters")
-            print("=" * 70)
-            print("Processing complete!")
-
-        return 0
+        if is_image:
+            return _process_image(input_path, output_path, args)
+        elif ext == '.pdf':
+            return _process_pdf(input_path, output_path, args)
+        else:
+            print(
+                f"Error: Unsupported file type '{ext}'. "
+                f"Supported: .pdf, {', '.join(sorted(_IMAGE_EXTS))}",
+                file=sys.stderr,
+            )
+            return 1
 
     except KeyboardInterrupt:
         print("\n\nInterrupted by user", file=sys.stderr)
@@ -77,6 +49,79 @@ def _cmd_process(args) -> int:
         return 1
 
 
+def _process_pdf(input_path: Path, output_path: Path, args) -> int:
+    """Full pipeline for PDFs (layout + OCR + formula)."""
+    from .pipeline import PaperStructurePipeline
+
+    if args.verbose:
+        print("=" * 70)
+        print("Paper Structure Analysis")
+        print("=" * 70)
+        print(f"Input:  {input_path}")
+        print(f"Output: {output_path}")
+        print(f"Layout Model: {args.layout_model}")
+        print(f"Formula Recognition: {'Enabled' if not args.no_formulas else 'Disabled'}")
+        print(f"Skip Types: {', '.join(args.skip)}")
+        if args.max_pages:
+            print(f"Max Pages: {args.max_pages}")
+        print("=" * 70)
+        print()
+        print("Initializing pipeline...")
+
+    pipeline = PaperStructurePipeline(
+        layout_model=args.layout_model,
+        use_formula_recognition=not args.no_formulas,
+        skip_types=args.skip,
+    )
+
+    result = pipeline.process_pdf(
+        str(input_path),
+        page_limit=args.max_pages,
+        output_dir=str(output_path.parent),
+    )
+
+    pipeline.save_markdown(
+        result, str(output_path), save_images=args.save_images
+    )
+
+    if args.verbose:
+        print(f"Total length: {len(result['markdown'])} characters")
+        print("=" * 70)
+        print("Processing complete!")
+    return 0
+
+
+def _process_image(input_path: Path, output_path: Path, args) -> int:
+    """Direct OCR for images — no layout detection."""
+    from .pipeline import OCR
+
+    use_formula = getattr(args, 'formula', False)
+    mode = "formula" if use_formula else "text"
+
+    if args.verbose:
+        print("=" * 70)
+        print(f"OCR ({mode} mode)")
+        print("=" * 70)
+        print(f"Input:  {input_path}")
+        print(f"Output: {output_path}")
+        print("=" * 70)
+        print()
+
+    ocr = OCR()
+    text = ocr(str(input_path), formula=use_formula)
+
+    output_path.write_text(text, encoding='utf-8')
+
+    if args.verbose:
+        print(f"Saved to: {output_path}")
+        print(f"Length: {len(text)} characters")
+        print("=" * 70)
+        print("Done!")
+    else:
+        print(f"Saved to: {output_path}")
+    return 0
+
+
 def _cmd_preview(args) -> int:
     """Process a PDF and generate an annotated preview PDF."""
     from .pipeline import PaperStructurePipeline
@@ -87,8 +132,8 @@ def _cmd_preview(args) -> int:
         print(f"Error: Input file '{args.input}' not found", file=sys.stderr)
         return 1
 
-    if not input_path.suffix.lower() == '.pdf':
-        print(f"Error: Input file must be a PDF", file=sys.stderr)
+    if input_path.suffix.lower() != '.pdf':
+        print("Error: preview only supports PDF files", file=sys.stderr)
         return 1
 
     output_path = Path(args.output) if args.output else input_path.with_name(f"{input_path.stem}_preview.pdf")
@@ -99,10 +144,6 @@ def _cmd_preview(args) -> int:
         print("=" * 70)
         print(f"Input:  {input_path}")
         print(f"Output: {output_path}")
-        print(f"Layout Model: {args.layout_model}")
-        print(f"Formula Recognition: {'Enabled' if not args.no_formulas else 'Disabled'}")
-        if args.max_pages:
-            print(f"Max Pages: {args.max_pages}")
         print("=" * 70)
         print()
 
@@ -190,29 +231,33 @@ def main():
     # ── process ──
     p_process = subparsers.add_parser(
         "process",
-        help="Process a PDF and produce markdown",
+        help="Process a PDF or image",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  paper-structure process input.pdf -o output.md
-  paper-structure process input.pdf -o output.md --max-pages 3
-  paper-structure process input.pdf --no-formulas
+  paper-structure process paper.pdf -o output.md
+  paper-structure process photo.png -o output.txt
+  paper-structure process formula.png --formula
+  paper-structure process paper.pdf --max-pages 3 --save-images
         """,
     )
-    p_process.add_argument('input', type=str, help='Input PDF file path')
+    p_process.add_argument('input', type=str,
+                           help='Input PDF or image file (png, jpg, bmp, tiff, webp)')
     p_process.add_argument('-o', '--output', type=str, default=None,
-                           help='Output markdown file path (default: <input>_output.md)')
+                           help='Output file path (default: <input>_output.md/.txt)')
+    p_process.add_argument('--formula', action='store_true',
+                           help='(Images only) Use LaTeX formula recognition instead of text OCR')
     p_process.add_argument('--max-pages', type=int, default=None,
-                           help='Maximum number of pages to process')
+                           help='(PDF only) Maximum number of pages to process')
     p_process.add_argument('--skip', nargs='+', default=['Page-header', 'Page-footer'],
-                           help='Element types to skip')
+                           help='(PDF only) Element types to skip')
     p_process.add_argument('--no-formulas', action='store_true',
-                           help='Disable formula recognition')
+                           help='(PDF only) Disable formula recognition')
     p_process.add_argument('--save-images', action='store_true',
-                           help='Save extracted images to an images/ directory')
+                           help='(PDF only) Save extracted images to an images/ directory')
     p_process.add_argument('--layout-model', type=str, default='yolox',
-                           choices=['yolox', 'yolox_tiny', 'yolox_quantized'],
-                           help='Layout detection model (default: yolox)')
+                           choices=['yolox'],
+                           help='(PDF only) Layout detection model (default: yolox)')
     p_process.add_argument('-v', '--verbose', action='store_true',
                            help='Enable verbose output')
     p_process.set_defaults(func=_cmd_process)
@@ -238,16 +283,15 @@ Examples:
     # ── preview ──
     p_preview = subparsers.add_parser(
         "preview",
-        help="Process a PDF and generate an annotated preview PDF with bounding boxes",
+        help="Generate an annotated preview PDF with bounding boxes",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  paper-structure preview input.pdf -o preview.pdf
-  paper-structure preview input.pdf --max-pages 3 -v
-  paper-structure preview input.pdf --no-formulas
+  paper-structure preview paper.pdf -o preview.pdf
+  paper-structure preview paper.pdf --max-pages 3 -v
         """,
     )
-    p_preview.add_argument('input', type=str, help='Input PDF file path')
+    p_preview.add_argument('input', type=str, help='Input PDF file')
     p_preview.add_argument('-o', '--output', type=str, default=None,
                            help='Output preview PDF path (default: <input>_preview.pdf)')
     p_preview.add_argument('--max-pages', type=int, default=None,
@@ -262,11 +306,8 @@ Examples:
     p_preview.set_defaults(func=_cmd_preview)
 
     # ── backwards compat: bare positional arg = process ──
-    # Detect legacy usage like `cli.py input.pdf -o output.md`
-    # before argparse swallows the error on unknown subcommand.
     argv = sys.argv[1:]
     if argv and argv[0] not in ('process', 'models', 'preview', '-h', '--help') and not argv[0].startswith('-'):
-        # Looks like a bare file path – treat as `process <args>`
         argv_with_cmd = ['process'] + argv
         args = parser.parse_args(argv_with_cmd)
         return args.func(args)
@@ -282,4 +323,3 @@ Examples:
 
 if __name__ == '__main__':
     sys.exit(main())
-

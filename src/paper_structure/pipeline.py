@@ -625,3 +625,74 @@ class PaperStructurePipeline:
             f")"
         )
 
+
+class OCR:
+    """
+    Lightweight image OCR — skips layout detection entirely.
+
+    Use this for standalone images (photos, screenshots, cropped regions)
+    where YOLOX layout detection is not appropriate.
+
+    Default mode runs text OCR (PaddleOCR).  Pass ``formula=True`` to run
+    LaTeX formula recognition instead.
+
+    Usage::
+
+        from paper_structure import OCR
+
+        ocr = OCR()
+        print(ocr("table.png"))              # text OCR
+        print(ocr("formula.png", formula=True))  # LaTeX formula
+    """
+
+    def __init__(self, use_gpu: bool = False, use_dml: bool = False):
+        self._text_recognizer: Optional[TextRecognizer] = None
+        self._formula_recognizer: Optional[FormulaRecognizer] = None
+        self._use_gpu = use_gpu
+        self._use_dml = use_dml
+
+    # Lazy init so we only load what's needed
+    @property
+    def text_recognizer(self) -> TextRecognizer:
+        if self._text_recognizer is None:
+            self._text_recognizer = TextRecognizer(
+                use_angle_cls=False, use_gpu=self._use_gpu, use_dml=self._use_dml
+            )
+        return self._text_recognizer
+
+    @property
+    def formula_recognizer(self) -> FormulaRecognizer:
+        if self._formula_recognizer is None:
+            self._formula_recognizer = FormulaRecognizer()
+        return self._formula_recognizer
+
+    def __call__(self, image_path: str, formula: bool = False) -> str:
+        """
+        Run OCR on an image file.
+
+        Args:
+            image_path: Path to an image file (png, jpg, etc.)
+            formula: If True, run LaTeX formula recognition instead of text OCR.
+
+        Returns:
+            Recognized text or LaTeX string.
+        """
+        pil_image = Image.open(image_path).convert("RGB")
+        if formula:
+            return self.recognize_formula(pil_image)
+        return self.recognize_text(pil_image)
+
+    def recognize_text(self, image: Image.Image) -> str:
+        """Run text OCR on a PIL Image. Returns recognized text."""
+        results = self.text_recognizer.recognize(image)
+        # Sort by y then x and join
+        results.sort(key=lambda r: (r['bbox'][1], r['bbox'][0]))
+        return '\n'.join(r['text'] for r in results)
+
+    def recognize_formula(self, image: Image.Image) -> str:
+        """Run LaTeX formula recognition on a PIL Image."""
+        return self.formula_recognizer.recognize(image)
+
+    def __repr__(self):
+        return "OCR(text=PaddleOCR, formula=LaTeXOCR)"
+
